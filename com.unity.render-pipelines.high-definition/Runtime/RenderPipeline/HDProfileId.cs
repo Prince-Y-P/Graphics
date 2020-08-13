@@ -16,6 +16,7 @@ namespace UnityEngine.Rendering.HighDefinition
         DenoiseSSAO,
         UpSampleSSAO,
         ScreenSpaceShadows,
+        ScreenSpaceShadowsDebug,
         BuildLightList,
         ContactShadows,
         BlitToFinalRTDevBuildOnly,
@@ -127,6 +128,8 @@ namespace UnityEngine.Rendering.HighDefinition
         RaytracingSSS,
         RaytracingSSSTrace,
         RaytracingSSSCompose,
+        // RTShadow
+        RaytracingWriteShadow,
         // Other ray tracing
         RaytracingDebugOverlay,
         RayTracingRecursiveRendering,

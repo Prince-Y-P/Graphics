@@ -1,3 +1,6 @@
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Experimental.Rendering.RenderGraphModule;
+
 namespace UnityEngine.Rendering.HighDefinition
 {
     class HDDiffuseShadowDenoiser
@@ -164,6 +167,66 @@ namespace UnityEngine.Rendering.HighDefinition
             DiffuseShadowDirectionalDenoiserParameters dsddParams = PrepareDiffuseShadowDirectionalDenoiserParameters(hdCamera, angularDiameter, kernelSize, singleChannel);
             DiffuseShadowDirectionalDenoiserResources dsddResources = PrepareDiffuseShadowDirectionalDenoiserResources(distanceBuffer, noisyBuffer, intermediateBuffer, outputBuffer);
             ExecuteDiffuseShadowDirectionalDenoiser(cmd, dsddParams, dsddResources);
+        }
+
+        class DiffuseShadowDenoiserDirectionalPassData
+        {
+            public DiffuseShadowDirectionalDenoiserParameters parameters;
+            public TextureHandle depthStencilBuffer;
+            public TextureHandle normalBuffer;
+            public TextureHandle distanceBuffer;
+            public TextureHandle noisyBuffer;
+            public TextureHandle intermediateBuffer;
+            public TextureHandle outputBuffer;
+        }
+
+        public TextureHandle DenoiseBufferDirectional(RenderGraph renderGraph, HDCamera hdCamera,
+                            TextureHandle depthBuffer, TextureHandle normalBuffer,
+                            TextureHandle noisyBuffer, TextureHandle distanceBuffer,
+                            int kernelSize, float angularDiameter, bool singleChannel = true)
+        {
+            // Request the intermediate buffer we need
+            RTHandle intermediateBuffer = m_RenderPipeline.GetRayTracingBuffer(InternalRayTracingBuffers.RGBA3);
+
+            using (var builder = renderGraph.AddRenderPass<DiffuseShadowDenoiserDirectionalPassData>("TemporalDenoiser", out var passData, ProfilingSampler.Get(HDProfileId.DiffuseFilter)))
+            {
+                // Cannot run in async
+                builder.EnableAsyncCompute(false);
+
+                // Fetch all the resources
+                passData.parameters = PrepareDiffuseShadowDirectionalDenoiserParameters(hdCamera, angularDiameter, kernelSize, singleChannel);
+
+                // Input buffers
+                passData.depthStencilBuffer = builder.UseDepthBuffer(depthBuffer, DepthAccess.Read);
+                passData.normalBuffer = builder.ReadTexture(normalBuffer);
+                passData.distanceBuffer = builder.ReadTexture(distanceBuffer);
+                passData.noisyBuffer = builder.ReadTexture(noisyBuffer);
+
+                // Temporary buffers
+                passData.intermediateBuffer = builder.CreateTransientTexture(new TextureDesc(Vector2.one, true, true)
+                { colorFormat = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Intermediate buffer" });
+
+                // Output buffer
+                passData.outputBuffer = builder.ReadTexture(builder.WriteTexture(renderGraph.CreateTexture(new TextureDesc(Vector2.one, true, true)
+                { colorFormat = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Denoised Buffer" })));
+
+
+                builder.SetRenderFunc(
+                (DiffuseShadowDenoiserDirectionalPassData data, RenderGraphContext ctx) =>
+                {
+                    DiffuseShadowDirectionalDenoiserResources resources = new DiffuseShadowDirectionalDenoiserResources();
+                    resources.depthStencilBuffer = data.depthStencilBuffer;
+                    resources.normalBuffer = data.normalBuffer;
+                    resources.distanceBuffer = data.distanceBuffer;
+                    resources.noisyBuffer = data.noisyBuffer;
+
+                    resources.intermediateBuffer = data.intermediateBuffer;
+
+                    resources.outputBuffer = data.outputBuffer;
+                    ExecuteDiffuseShadowDirectionalDenoiser(ctx.cmd, data.parameters, resources);
+                });
+                return passData.outputBuffer;
+            }
         }
 
         struct DiffuseShadowSphereDenoiserParameters
